@@ -69,6 +69,13 @@ public class SnapshotInterpolation : MonoBehaviour {
 
   void Start() {
     _clientInterpolationTimeScale = 1;
+    
+    // moving avg integrator to track client offset vs server
+    _clientTimeOffsetAvg = new FloatIntegratorEma();
+    _clientTimeOffsetAvg.Initialize(SNAPSHOT_RATE);
+
+    _clientSnapshotDeliveryDeltaAvg = new FloatIntegratorEma();
+    _clientSnapshotDeliveryDeltaAvg.Initialize(SNAPSHOT_RATE);
   }
 
   void Update() {
@@ -80,14 +87,68 @@ public class SnapshotInterpolation : MonoBehaviour {
     ClientUpdateInterpolationTime();
     ClientReceiveDataFromServer();
     ClientRenderLatestPostion();
-
-    // moving avg integrator to track client offset vs server
-    _clientTimeOffsetAvg = new FloatIntegratorEma();
-    _clientTimeOffsetAvg.Initialize(SNAPSHOT_RATE);
-
-    _clientSnapshotDeliveryDeltaAvg = new FloatIntegratorEma();
-    _clientSnapshotDeliveryDeltaAvg.Initialize(SNAPSHOT_RATE);
   }
+  
+  /*
+   
+   lag compensation how its usually done:
+   
+   SERVER:
+   
+   - record hitbox positions every X seconds, could be every Update or every FixedUpdate or such
+   - replicating some type of transform data down to the clients, for like position/rotation of enemy characters, etc.
+   - usually a network time attached to this data somehow
+   
+   CLIENT:
+   
+   - network time is attempted to be kept in sync with the servers network time and is re-adjusted 
+   - position and rotation rendering for remote entities are done using network time (sometimes)
+   
+   LAG COMP:
+   
+   - "fire" gun on client
+   - send "fire" to server and attach clients local network time
+   - recv "fire" on server and subtract/add/etc. clients ping from the network time
+   
+   lag comp how it should be done:
+   
+   SERVER:
+   
+   - use a fixed step simulation on server and client that ticks at the same rate, say 60hz
+   - record hitbox positions _every_ simulation tick on server
+   - send position/rotation data from server to client stamp it with tick number
+   
+   CLIENT:
+   
+   - we use a local interpolation "time" to render the position tick data that we get
+   - snapshot for tick 100 => time = 100 * 16.67 = 166.7 seconds 
+    
+   LAG COMP:
+   
+   - "fire" gun on client
+   - send "fire" to server and attach: 
+     - current ticks we interpolate between to render
+     - the alpha value between these two ticks, i.e. the 't' value for the interpolation
+   - recv "fire", server reconsstructs clients view using two tick numbers + alpha value
+   - 0.46f between tick 100 and 101
+   
+   */
+  
+  /*
+   ON CLIENT:
+   
+   position data:
+   
+   1
+   1.05
+   1.095
+   1.155
+   
+   1.005
+   1.009
+   1.016
+   1.022
+   */
 
   void ClientReceiveDataFromServer() {
     var received = false;
